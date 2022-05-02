@@ -140,7 +140,9 @@ bedtools intersect -a REP2_noBL.bed -b ATAC.bed -v > REP2_vs_ATAC_notoverlap
 bedtools intersect -a REP2_noBL.bed -b ATAC.bed -u > REP2_vs_ATAC_overlap
 
 
-########## The post processing of this analysis was done using seqminer, PSCAN-ChIP and GREAT. 
+########## The post processing of this analysis was done using seqminer, PSCAN-ChIP and GREAT. ################
+
+
 
 
 
