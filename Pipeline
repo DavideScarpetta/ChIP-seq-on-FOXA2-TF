@@ -1,0 +1,154 @@
+##### ChIP-seq Data Anlysis on FOXA2 transcription factor 
+
+# Downloading raw bam files, both unfiltered alignents and filtered alignments of both replicates 
+
+wget https://www.encodeproject.org/files/ENCFF125DHJ/@@download/ENCFF125DHJ.bam 
+mv ENCFF125DHJ.bam unfiltered_alignments1.bam ##Changing the name of the file
+
+wget https://www.encodeproject.org/files/ENCFF720ICJ/@@download/ENCFF720ICJ.bam
+mv ENCFF720ICJ.bam unfiltered_alignments2.bam
+
+wget https://www.encodeproject.org/files/ENCFF055CHF/@@download/ENCFF055CHF.bam
+mv ENCFF055CHF.bam alignments1.bam
+
+wget https://www.encodeproject.org/files/ENCFF463OKE/@@download/ENCFF463OKE.bam
+mv ENCFF463OKE.bam alignments2.bam
+
+# Downloading control file, both filtered and unfiltered 
+
+wget https://www.encodeproject.org/files/ENCFF893ZYK/@@download/ENCFF893ZYK.bam
+mv ENCFF893ZYK.bam unfiltered_control.bam
+
+wget https://www.encodeproject.org/files/ENCFF723HPB/@@download/ENCFF723HPB.bam
+mv ENCFF723HPB.bam control.bam
+
+# Checking the number and the percentage of total and mapped reads
+
+samtools flagstat unfiltered_alignments1.bam
+samtools flagstat unfiltered_alignments2.bam
+samtools flagstat unfiltered_control.bam
+
+# Downsampling process
+# In order to make the control file comparable with the replicates file, the important thing is to have same read lenght and almost the same number of reads.
+# To do so, I have performed five downsampling, and therefore five different analysis were done, in order to have more reliability of my work. 
+# I am reporting just one downsampling and subsequent analysis
+
+samtools view -s 3.4 -b control.bam -o subsampled_control.bam
+samtools view -s 3.22 -b unfiltered_control.bam -o unfilt_subsampled_control.bam
+
+# Calling peaks, first on the unflitered files in order to check for the redundant rate
+
+macs2 callpeak -t unfiltered_alignments1.bam -c unfilt_subsampled_control.bam -n unfilt_REP1_peaks -q 0.01
+macs2 callpeak -t unfiltered_alignments2.bam -c unfilt_subsampled_control1.bam -n unfilt_REP2_peaks_c1 -q 0.01
+
+macs2 callpeak -t alignments1.bam -c subsampled_control.bam -n REP1_peaks -q 0.01
+macs2 callpeak -t alignments2.bam -c subsampled_control.bam -n REP2_peaks -q 0.01
+
+# Checking the number of peaks in common between the two replicates
+
+bedtools intersect -a REP1_peaks.narrowPeak -b REP2_peaks.narrowPeak | wc -l
+bedtools window -a REP1_peaks_c1_summits.bed -b REP2_peaks_c1_summits.bed -w 100 -u | wc -l  #How many of them have a summit under 100 bp of distance?
+
+# Merging the two replicates while calling peaks
+
+macs2 callpeak -t alignments1.bam alignments2.bam -c subsampled_control.bam -q 0.01 -n Merged
+
+# Intersecting the two replicates
+
+bedtools closest -d -a REP1_peaks_c1_summits.bed -b REP2_peaks_c1_summits.bed > REP1REP2_summits.bed
+
+# Downloading and removing the black list from my files
+
+wget https://www.encodeproject.org/files/ENCFF356LFX/@@download/ENCFF356LFX.bed.gz
+mv ENCFF356LFX.bed.gz BlackList.bed.gz
+
+bedtools intersect -v -a REP1_summits.bed -b BlackList.bed.gz > REP1_noBL_summits.bed
+bedtools intersect -v -a REP2_summits.bed -b BlackList.bed.gz > REP2_noBL_summits.bed
+bedtools intersect -v -a Merged_summits.bed -b BlackList.bed.gz > Merged_noBL_summits.bed
+bedtools intersect -v -a REP1REP2_summits.bed -b BlackList.bed.gz > REP1REP2_noBL_summits.bed
+
+# Downloading the IDR file from ENCODE, transforming it in a summits file and sorting it  
+
+wget https://www.encodeproject.org/files/ENCFF894AYY/@@download/ENCFF894AYY.bigBed
+mv ENCFF894AYY.bigBed IDR_peaks.bed.gz
+
+gawk 'BEGIN{OFS="\t"; peak=0} {print $1, $2 + $10, $2 + $10, "idr_peak_" peak; peak++}' IDR_peaks_sorted.bed.gz | bedtools sort > IDR_summits_sorted.bed.gz
+
+# This is a bash script in order to search how many peaks have in common my files with the IDR one, with a summit behind 100 bp
+
+                    #!/bin/sh
+
+                    summit_file=$2_summits.bed
+                    result=$1_$2_closest.bed
+                    gawk 'BEGIN{OFS="\t"; peak=0} {print $1, $2 + $10, $2 + $10, "peak" peak; peak++}' $2 | bedtools sort > $summit_file
+                    bedtools closest -d -a $1 -b $summit_file > $result
+                    echo Common peaks between $1 and $2: $(gawk 'BEGIN{common_peaks = 0} {if($11 <=100) common_peaks++} END{print common_pe$
+
+# To find peaks that not overlap with the IDR file
+
+bedtools window -a REP1_summits.bed -b IDR_summits_sorted.bed -w 100 -v > REP1_vs_IDR.bed
+bedtools window -a REP2_summits.bed -b IDR_summits_sorted.bed -w 100 -v > REP2_vs_IDR.bed
+bedtools window -a Merged_summits.bed -b IDR_summits_sorted.bed -w 100 -v > MERGED_vs_IDR.bed
+bedtools window -a REP1REP2_summits.bed -b IDR_summits_sorted.bed -w 100 -v > REP1REP2_vs_IDR.bed
+
+# Now creating my personal IDR file
+# Calling peaks with a less stringent threshold
+
+macs2 callpeak -t alignments1.bam -c subsampled_control.bam -q 0.05 -n REP1_005
+macs2 callpeak -t alignments2.bam -c subsampled_control.bam -q 0.05 -n REP2_005
+
+# Sorting by pvalue 
+
+sort -k8,8nr REP1_005_peaks.narrowPeak > REP1_005_sorted_peaks.narrowPeak
+sort -k8,8nr REP2_005_peaks.narrowPeak > REP2_005_sorted_peaks.narrowPeak
+
+# Calling IDR function
+
+idr --samples REP1_005_sorted_peaks.narrowPeak REP2_005_sorted_peaks.narrowPeak --input-file-type narrowPeak --rank p.value --output-file REP_idr --plot --log-output-file rep.idr.log
+
+# Filtering for peaks with IDR < 0.1
+
+awk '{if($5 >= 290) print $0}' REP_idr > REP_idr
+
+# Sorting the resulting file
+
+bedtools sort -i REP_idr_001 > REP_idr_001_sorted
+
+# Transforming it in a summits file
+
+gawk 'BEGIN{OFS="\t"; peak=0} {print $1, $2 + $10, $2 + $10, "idr_peak_" peak; peak++}' REP_idr_001_sorted > REP_idr_001_sorted_summits
+
+# Searching how many peaks my IDR file have with the ENCODE's one
+
+bedtools closest -d -a REP_idr_001_sorted_summits -b IDR_summits_sorted.bed.gz > MINEIDR_vs_ENCODE
+
+# Now searching the prevalent Chromatine state
+
+wget http://159.149.160.56/Ideas_HepG2_GRCh38.bed.gz
+gunzip Ideas_HepG2_GRCh38.bed.gz
+
+bedtools intersect -a REP2_noBL.bed -b  Ideas_HepG2_GRCh38.bed  -wa -wb > REP2_vs_CHROM
+
+# Now intersecting REP2 file with the ATAC-seq taken from encode in order to see if my tf interact with prevalence with closed or open chromatine
+
+wget https://www.encodeproject.org/files/ENCFF415KLW/@@download/ENCFF415KLW.bed.gz
+mv ENCFF415KLW.bed.gz ATAC.bed.gz
+gunzip ATAC.bed.gz
+
+bedtools intersect -a REP2_noBL.bed -b ATAC.bed -v > REP2_vs_ATAC_notoverlap
+
+bedtools intersect -a REP2_noBL.bed -b ATAC.bed -u > REP2_vs_ATAC_overlap
+
+
+########## The post processing of this analysis was done using seqminer, PSCAN-ChIP and GREAT. 
+
+
+
+
+
+
+
+
+
+
+
